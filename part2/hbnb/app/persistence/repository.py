@@ -1,3 +1,4 @@
+from app import db
 from abc import ABC, abstractmethod
 
 class Repository(ABC):
@@ -19,30 +20,39 @@ class Repository(ABC):
     @abstractmethod
     def get_by_attribute(self, attr_name, attr_value): pass
 
-class InMemoryRepository(Repository):
-    def __init__(self):
-        self._storage = {}
+class SQLAlchemyRepository(Repository):
+    def __init__(self, model):
+        """
+        model: The SQLAlchemy model class (e.g., User, Place)
+        """
+        self.model = model
 
     def add(self, obj):
-        self._storage[obj.id] = obj
+        db.session.add(obj)
+        db.session.commit()
 
     def get(self, obj_id):
-        return self._storage.get(obj_id)
+        return self.model.query.get(obj_id)
 
     def get_all(self):
-        return list(self._storage.values())
+        return self.model.query.all()
 
     def update(self, obj_id, data):
         obj = self.get(obj_id)
         if obj:
-            # Assumes objects have a .update() method or manual attribute setting
             for key, value in data.items():
-                setattr(obj, key, value)
+                if hasattr(obj, key):
+                    setattr(obj, key, value)
+            db.session.commit()
+        return obj
 
     def delete(self, obj_id):
-        if obj_id in self._storage:
-            del self._storage[obj_id]
+        obj = self.get(obj_id)
+        if obj:
+            db.session.delete(obj)
+            db.session.commit()
+            return True
+        return False
 
     def get_by_attribute(self, attr_name, attr_value):
-        return next((obj for obj in self._storage.values() 
-                    if getattr(obj, attr_name) == attr_value), None)
+        return self.model.query.filter(getattr(self.model, attr_name) == attr_value).first()

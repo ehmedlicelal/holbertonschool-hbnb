@@ -1,4 +1,7 @@
-from app.persistence.repository import InMemoryRepository
+from app.persistence.repository import SQLAlchemyRepository
+# If you created the user_repository, import it here:
+# from app.persistence.user_repository import UserRepository 
+
 from app.models.user import User
 from app.models.amenity import Amenity
 from app.models.place import Place
@@ -6,10 +9,12 @@ from app.models.review import Review
 
 class HBnBFacade:
     def __init__(self):
-        self.user_repo = InMemoryRepository()
-        self.amenity_repo = InMemoryRepository()
-        self.place_repo = InMemoryRepository()
-        self.review_repo = InMemoryRepository()
+        # 1. Switch to SQLAlchemy Repositories
+        # If you created the specialized UserRepository, use: self.user_repo = UserRepository()
+        self.user_repo = SQLAlchemyRepository(User) 
+        self.amenity_repo = SQLAlchemyRepository(Amenity)
+        self.place_repo = SQLAlchemyRepository(Place)
+        self.review_repo = SQLAlchemyRepository(Review)
 
     # --- User Methods ---
     def create_user(self, user_data):
@@ -21,6 +26,7 @@ class HBnBFacade:
         return self.user_repo.get(user_id)
 
     def get_user_by_email(self, email):
+        # SQLAlchemyRepository handles this cleanly now
         return self.user_repo.get_by_attribute('email', email)
 
     def get_all_users(self):
@@ -46,6 +52,8 @@ class HBnBFacade:
 
     # --- Place Methods ---
     def create_place(self, place_data):
+        # 2. SQLAlchemy only needs the Foreign Key (owner_id), 
+        # but we still check if the user exists first.
         owner = self.get_user(place_data.get('owner_id'))
         if not owner:
             raise ValueError("Owner not found")
@@ -56,14 +64,15 @@ class HBnBFacade:
             price=place_data['price'],
             latitude=place_data['latitude'],
             longitude=place_data['longitude'],
-            owner=owner
+            owner_id=owner.id  # Pass the ID instead of the object
         )
         
+        # Handle amenities
         amenity_ids = place_data.get('amenities', [])
         for amt_id in amenity_ids:
             amenity = self.get_amenity(amt_id)
             if amenity:
-                place.add_amenity(amenity)
+                place.amenities.append(amenity) # SQLAlchemy handles the Join Table!
 
         self.place_repo.add(place)
         return place
@@ -87,15 +96,17 @@ class HBnBFacade:
         if not place:
             raise ValueError("Place not found")
 
+        # 3. Pass the Foreign Keys
         new_review = Review(
             text=review_data['text'],
             rating=review_data['rating'],
-            place=place,
-            user=user
+            place_id=place.id,
+            user_id=user.id
         )
+        
         self.review_repo.add(new_review)
-        # Link the review to the place's internal list
-        place.add_review(new_review)
+        # We NO LONGER need to manually add the review to a place's list. 
+        # SQLAlchemy's "backref" handles that automatically!
         return new_review
 
     def get_review(self, review_id):
@@ -108,16 +119,12 @@ class HBnBFacade:
         place = self.get_place(place_id)
         if not place:
             return None
-        return place.reviews
+        return place.reviews # SQLAlchemy handles fetching these from the DB
 
     def update_review(self, review_id, review_data):
         return self.review_repo.update(review_id, review_data)
 
     def delete_review(self, review_id):
-        review = self.get_review(review_id)
-        if review:
-            # Remove from place's list as well
-            if review.place and review in review.place.reviews:
-                review.place.reviews.remove(review)
-            return self.review_repo.delete(review_id)
-        return False
+        # 4. We NO LONGER need to manually remove it from the Place's list.
+        # SQLAlchemy deletes the row, and it automatically disappears from place.reviews
+        return self.review_repo.delete(review_id)
